@@ -103,6 +103,15 @@ export default function Home() {
 
   return (
     <main className="container mx-auto px-4 py-8 max-w-2xl">
+      {/* SMEC AI Logo */}
+      <div className="flex justify-center mb-6">
+        <img
+          src="/smec_ai_logo_horizontal.png"
+          alt="SMEC AI"
+          className="h-12 w-auto"
+        />
+      </div>
+
       <div className="text-center mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
           PDF to HL7 Converter
