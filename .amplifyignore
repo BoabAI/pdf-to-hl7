@@ -1,0 +1,47 @@
+# AWS Amplify Ignore File
+# Files and directories that should not be deployed
+
+# Git
+.git
+.gitignore
+
+# Dependencies (Amplify installs during build)
+node_modules
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Documentation
+*.md
+!README.md
+
+# Local environment files
+.env
+.env.local
+.env.development
+.env.production
+.env*.local
+
+# Test files
+/test-pdfs/
+*.test.ts
+*.spec.ts
+*.test.pdf
+/coverage
+
+# Misc
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Bun lockfile (use bun.lock instead)
+bun.lockb
