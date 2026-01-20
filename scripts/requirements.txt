@@ -1,0 +1,6 @@
+# PDF to HL7 Converter - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# PDF text extraction - choose ONE:
+PyMuPDF>=1.23.0    # Recommended - faster, more reliable
+# pdfplumber>=0.10.0  # Alternative if PyMuPDF has issues

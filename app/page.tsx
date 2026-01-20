@@ -121,6 +121,14 @@ export default function Home() {
         </p>
       </div>
 
+      {/* Supported Format Notice */}
+      <div className="mb-6 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+        <p className="text-sm text-amber-800">
+          <strong>Supported format:</strong> BJC Health Patient Information and Consent Forms only.
+          Other PDF formats may not extract patient data correctly.
+        </p>
+      </div>
+
       {/* Upload Area */}
       <div
         onDragOver={handleDragOver}

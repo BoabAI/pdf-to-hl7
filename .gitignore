@@ -6,8 +6,6 @@
 
 # Testing
 /coverage
-*.test.ts
-*.spec.ts
 
 # Next.js
 /.next/
@@ -16,6 +14,10 @@
 # Production
 /build
 /dist
+
+# Python
+__pycache__/
+*.pyc
 
 # Misc
 .DS_Store
