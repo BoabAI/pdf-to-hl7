@@ -6,6 +6,9 @@ frontend:
         - npm install
     build:
       commands:
+        # Create .env.production from Amplify env vars for runtime
+        - echo "APP_PASSWORD=$APP_PASSWORD" > .env.production
+        - echo "Created .env.production with APP_PASSWORD"
         - npm run build
   artifacts:
     baseDirectory: .next
