@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 
 export default function LoginPage() {
   const [password, setPassword] = useState("");
@@ -44,10 +45,13 @@ export default function LoginPage() {
       <div className="max-w-md w-full space-y-8">
         {/* Logo */}
         <div className="flex justify-center">
-          <img
+          <Image
             src="/smec_ai_logo_horizontal.png"
             alt="SMEC AI"
+            width={200}
+            height={48}
             className="h-12 w-auto"
+            priority
           />
         </div>
 

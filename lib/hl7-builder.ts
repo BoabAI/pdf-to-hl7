@@ -23,6 +23,9 @@ export interface HL7Options {
   receivingApplication?: string;
   receivingFacility?: string;
   documentTitle?: string;
+  // Genie actions
+  resultStatus?: "F" | "P"; // OBR-25: Final (auto-file) or Preliminary (queue for review)
+  orderingProvider?: string; // PV1-9: Medicare Provider Number for doctor routing
 }
 
 const DEFAULT_OPTIONS: HL7Options = {
@@ -182,11 +185,21 @@ function buildPID(patient: PatientData): string {
 /**
  * Build PV1 (Patient Visit) segment
  */
-function buildPV1(): string {
-  // Minimal PV1 for outpatient document
+function buildPV1(options: HL7Options): string {
   // PV1-1: Set ID
   // PV1-2: Patient Class (O = Outpatient)
-  return ["PV1", "1", "O"].join(FIELD_SEP);
+  // PV1-9: Consulting Doctor (routes to this doctor's inbox in Genie)
+  const fields = ["PV1", "1", "O"];
+
+  if (options.orderingProvider) {
+    // Pad fields 3-8 (empty)
+    for (let i = 0; i < 6; i++) fields.push("");
+    // PV1-9: Consulting Doctor with Medicare Provider Number
+    // Format: ProviderNumber^^^AUSHICPR
+    fields.push(`${options.orderingProvider}^^^AUSHICPR`);
+  }
+
+  return fields.join(FIELD_SEP);
 }
 
 /**
@@ -219,7 +232,7 @@ function buildOBR(options: HL7Options): string {
 
   fields.push(timestamp); // OBR-22: Results Rpt/Status Chng
   fields.push("", ""); // OBR-23, OBR-24
-  fields.push("F"); // OBR-25: Result Status
+  fields.push(options.resultStatus || "F"); // OBR-25: Result Status (F=Final/auto-file, P=Preliminary/queue)
 
   return fields.join(FIELD_SEP);
 }
@@ -275,7 +288,7 @@ export function buildHL7Message(
   const segments = [
     buildMSH(mergedOptions),
     buildPID(patient),
-    buildPV1(),
+    buildPV1(mergedOptions),
     buildOBR(mergedOptions),
     buildOBX(pdfBase64),
   ];

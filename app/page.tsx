@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Image from "next/image";
 
 interface ConversionResult {
   success: boolean;
@@ -21,6 +22,10 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
   const [result, setResult] = useState<ConversionResult | null>(null);
+  // Genie HL7 action options
+  const [autoFile, setAutoFile] = useState(true);
+  const [sendToDoctor, setSendToDoctor] = useState(false);
+  const [providerNumber, setProviderNumber] = useState("");
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -62,6 +67,10 @@ export default function Home() {
     try {
       const formData = new FormData();
       formData.append("pdf", file);
+      formData.append("autoFile", autoFile.toString());
+      if (sendToDoctor && providerNumber.trim()) {
+        formData.append("orderingProvider", providerNumber.trim());
+      }
 
       const response = await fetch("/api/convert", {
         method: "POST",
@@ -105,10 +114,13 @@ export default function Home() {
     <main className="container mx-auto px-4 py-8 max-w-2xl">
       {/* SMEC AI Logo */}
       <div className="flex justify-center mb-6">
-        <img
+        <Image
           src="/smec_ai_logo_horizontal.png"
           alt="SMEC AI"
+          width={200}
+          height={48}
           className="h-12 w-auto"
+          priority
         />
       </div>
 
@@ -189,6 +201,46 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* Genie Actions */}
+      {file && !result?.success && (
+        <div className="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-4">
+          <h3 className="font-medium text-gray-700">Genie Import Options</h3>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoFile}
+              onChange={(e) => setAutoFile(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+            />
+            <span className="text-gray-700">Auto-file to patient record</span>
+            <span className="text-xs text-gray-500">(Final result)</span>
+          </label>
+
+          <div className="space-y-2">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={sendToDoctor}
+                onChange={(e) => setSendToDoctor(e.target.checked)}
+                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+              />
+              <span className="text-gray-700">Send to specific doctor</span>
+            </label>
+
+            {sendToDoctor && (
+              <input
+                type="text"
+                placeholder="Medicare Provider Number (e.g., 1234567A)"
+                value={providerNumber}
+                onChange={(e) => setProviderNumber(e.target.value)}
+                className="ml-7 w-full max-w-xs px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Convert Button */}
       {file && !result?.success && (

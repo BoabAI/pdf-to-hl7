@@ -45,9 +45,15 @@ export async function POST(request: NextRequest) {
       console.warn("PDF extraction warnings:", extraction.warnings);
     }
 
+    // Extract Genie action options
+    const autoFile = formData.get("autoFile") !== "false"; // Default to true
+    const orderingProvider = formData.get("orderingProvider") as string | null;
+
     // Build HL7 message with embedded PDF
     const hl7Content = buildHL7Message(extraction.data, pdfBuffer, {
       documentTitle: file.name.replace(/\.pdf$/i, ""),
+      resultStatus: autoFile ? "F" : "P", // F=Final (auto-file), P=Preliminary (queue)
+      orderingProvider: orderingProvider || undefined,
     });
 
     // Generate filename
