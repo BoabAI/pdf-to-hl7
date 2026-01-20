@@ -6,11 +6,9 @@ frontend:
         - npm install
     build:
       commands:
-        - echo "Environment variables check:"
-        - env | grep -E '^APP_' || echo "No APP_ variables found"
         - npm run build
   artifacts:
-    baseDirectory: .
+    baseDirectory: .next
     files:
       - '**/*'
   cache:
