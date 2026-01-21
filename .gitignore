@@ -56,6 +56,10 @@ bun.lockb
 /test-pdfs/
 *.test.pdf
 
+# Patient PDFs (may contain real patient data)
+docs/input PDF/*.pdf
+!docs/input PDF/Referral_dummy.pdf
+
 # AWS Amplify
 amplify-builds/
 aws-exports.js

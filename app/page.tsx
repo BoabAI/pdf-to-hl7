@@ -22,6 +22,8 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
   const [result, setResult] = useState<ConversionResult | null>(null);
+  // Document type selection
+  const [documentType, setDocumentType] = useState<"auto" | "consent_form" | "referral_letter">("auto");
   // Genie HL7 action options
   const [autoFile, setAutoFile] = useState(true);
   const [sendToDoctor, setSendToDoctor] = useState(false);
@@ -67,6 +69,7 @@ export default function Home() {
     try {
       const formData = new FormData();
       formData.append("pdf", file);
+      formData.append("documentType", documentType);
       formData.append("autoFile", autoFile.toString());
       if (sendToDoctor && providerNumber.trim()) {
         formData.append("orderingProvider", providerNumber.trim());
@@ -134,10 +137,10 @@ export default function Home() {
       </div>
 
       {/* Supported Format Notice */}
-      <div className="mb-6 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-        <p className="text-sm text-amber-800">
-          <strong>Supported format:</strong> BJC Health Patient Information and Consent Forms only.
-          Other PDF formats may not extract patient data correctly.
+      <div className="mb-6 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+        <p className="text-sm text-blue-800">
+          <strong>Supported formats:</strong> BJC Health Consent Forms and Specialist Referral Letters.
+          Document type is auto-detected, or select manually below.
         </p>
       </div>
 
@@ -205,7 +208,26 @@ export default function Home() {
       {/* Genie Actions */}
       {file && !result?.success && (
         <div className="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-4">
-          <h3 className="font-medium text-gray-700">Genie Import Options</h3>
+          <h3 className="font-medium text-gray-700">Conversion Options</h3>
+
+          {/* Document Type Selector */}
+          <div className="space-y-1">
+            <label htmlFor="documentType" className="block text-sm text-gray-700">
+              Document Type
+            </label>
+            <select
+              id="documentType"
+              value={documentType}
+              onChange={(e) => setDocumentType(e.target.value as "auto" | "consent_form" | "referral_letter")}
+              className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+            >
+              <option value="auto">Auto-detect</option>
+              <option value="consent_form">Consent Form</option>
+              <option value="referral_letter">Referral Letter</option>
+            </select>
+          </div>
+
+          <hr className="border-gray-200" />
 
           <label className="flex items-center gap-3 cursor-pointer">
             <input

@@ -38,8 +38,15 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const pdfBuffer = Buffer.from(arrayBuffer);
 
+    // Get document type preference (auto, consent_form, or referral_letter)
+    const documentTypeParam = formData.get("documentType") as string | null;
+    const documentType =
+      documentTypeParam === "consent_form" || documentTypeParam === "referral_letter"
+        ? documentTypeParam
+        : "auto";
+
     // Extract patient data from PDF
-    const extraction = await extractPatientData(pdfBuffer);
+    const extraction = await extractPatientData(pdfBuffer, documentType);
 
     if (!extraction.success && extraction.warnings.length > 0) {
       console.warn("PDF extraction warnings:", extraction.warnings);

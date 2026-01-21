@@ -6,7 +6,7 @@ import { extractPatientData, type DocumentType } from "./pdf-parser";
 // Test PDFs
 const CONSENT_FORM_PATH = join(
   import.meta.dir,
-  "../docs/Patient_Information_and_Consent_Form_2025-12-10T14-09-58_29503708_0 (1).pdf"
+  "../docs/input PDF/Patient_Information_and_Consent_Form_2025-12-10T14-09-58_29503708_0 (1).pdf"
 );
 
 const REFERRAL_DUMMY_PATH = join(

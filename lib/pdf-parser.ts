@@ -300,10 +300,14 @@ function extractReferralLetterData(
 }
 
 /**
- * Extract patient data from PDF - auto-detects document type
+ * Extract patient data from PDF
+ * @param pdfBuffer - The PDF file as a Buffer
+ * @param forceDocumentType - Optional: force a specific document type instead of auto-detecting
+ *                           "auto" or undefined = auto-detect
  */
 export async function extractPatientData(
-  pdfBuffer: Buffer
+  pdfBuffer: Buffer,
+  forceDocumentType?: DocumentType | "auto"
 ): Promise<ExtractionResult> {
   const warnings: string[] = [];
 
@@ -325,8 +329,11 @@ export async function extractPatientData(
       return { success: false, data: defaultData, warnings, documentType: "consent_form" };
     }
 
-    // Detect document type
-    const documentType = detectDocumentType(text);
+    // Determine document type (auto-detect or use forced type)
+    const documentType: DocumentType =
+      forceDocumentType && forceDocumentType !== "auto"
+        ? forceDocumentType
+        : detectDocumentType(text);
 
     // Extract based on document type
     let result: { data: PatientData; success: boolean };
