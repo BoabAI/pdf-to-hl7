@@ -1,19 +1,25 @@
 /**
  * PDF Text Extractor and Patient Data Parser
- * Designed for BJC Health Patient Information and Consent Form format
+ * Supports:
+ * - BJC Health Patient Information and Consent Form
+ * - Specialist Referral Letters (e.g., from NeuroSpine Clinic)
  */
 
 import pdf from "pdf-parse";
 import type { PatientData } from "./hl7-builder";
 
-interface ExtractionResult {
+// Document types supported
+export type DocumentType = "consent_form" | "referral_letter";
+
+export interface ExtractionResult {
   success: boolean;
   data: PatientData;
   warnings: string[];
+  documentType: DocumentType;
 }
 
-// Extraction patterns based on BJC Health form structure
-const PATTERNS = {
+// Extraction patterns for BJC Health consent forms
+const CONSENT_FORM_PATTERNS = {
   // Note: PDF radio button selection state cannot be extracted from text
   // This pattern looks for a standalone title that might appear selected
   title: /^\s*(Mr|Mrs|Miss|Ms)\s*$/m,
@@ -36,6 +42,35 @@ const PATTERNS = {
   // Medicare
   medicareNo: /Medicare Card No\.?\s*\*?\s*\n?\s*(\d{10,11})/i,
   medicareRef: /Medicare Ref\s*(?:Number)?\s*\*?\s*\n?\s*(\d)/i,
+};
+
+// Extraction patterns for referral letters (HIGH reliability)
+const REFERRAL_PATTERNS = {
+  // RE: FirstName LASTNAME - DOB: DD/MM/YYYY
+  // Handles both "RE: Scott LAWLER" and "RE: LAWLER, Scott" formats
+  patientLine:
+    /RE:\s*(?:([A-Za-z]+)\s+([A-Z][A-Z]+)|([A-Z][A-Z]+),\s*([A-Za-z]+))\s*[-–]\s*DOB:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i,
+
+  // Provider No: 457833CF (legally required on Australian medical letters)
+  providerNo: /Provider\s*No[:\.]?\s*(\d{6}[A-Z]{2})/i,
+
+  // Letter date - "13 January 2026" format
+  letterDate:
+    /(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})/i,
+
+  // Recipient doctor - "Dear Dr Altie" or "Dear Professor Smith"
+  recipientDoctor: /Dear\s+(?:Dr|Professor)\s+([A-Za-z\s]+?)(?:\n|,)/i,
+};
+
+// Secondary patterns for referral letters (MEDIUM reliability)
+const REFERRAL_PATTERNS_SECONDARY = {
+  // Phone - try multiple labels
+  phone: /(?:Mobile|Ph|Tel|Phone)[:\s]+(\d[\d\s]{9,14})/i,
+
+  // Address line after RE: line
+  // Matches: "104 Stratford Road, TAHMOOR, NSW, 2573"
+  addressLine:
+    /^\s*(\d+[^,\n]+),\s*([A-Z][A-Za-z\s]+),\s*([A-Z]{2,3}),?\s*(\d{4})\s*$/m,
 };
 
 // Map title to sex
@@ -96,7 +131,176 @@ function extractField(text: string, pattern: RegExp): string | null {
 }
 
 /**
- * Extract patient data from PDF text
+ * Detect document type from PDF text content
+ */
+function detectDocumentType(text: string): DocumentType {
+  // Referral letters have "Dear Dr" and "RE:" patterns
+  const hasDearDr = /Dear\s+(?:Dr|Professor)/i.test(text);
+  const hasReLine = /RE:/i.test(text);
+
+  if (hasDearDr && hasReLine) {
+    return "referral_letter";
+  }
+  return "consent_form";
+}
+
+/**
+ * Infer sex from pronouns in text
+ */
+function inferSexFromPronouns(text: string): "M" | "F" | "U" {
+  const malePronouns = (text.match(/\b(he|him|his)\b/gi) || []).length;
+  const femalePronouns = (text.match(/\b(she|her|hers)\b/gi) || []).length;
+
+  if (malePronouns > femalePronouns && malePronouns >= 2) return "M";
+  if (femalePronouns > malePronouns && femalePronouns >= 2) return "F";
+  return "U";
+}
+
+/**
+ * Extract patient data from consent form PDF
+ */
+function extractConsentFormData(
+  text: string,
+  warnings: string[]
+): { data: PatientData; success: boolean } {
+  const defaultData: PatientData = {
+    firstName: "UNKNOWN",
+    lastName: "PATIENT",
+    dob: "19000101",
+    sex: "U",
+  };
+
+  // Extract fields using consent form patterns
+  const firstName = extractField(text, CONSENT_FORM_PATTERNS.firstName);
+  const lastName = extractField(text, CONSENT_FORM_PATTERNS.lastName);
+  const dobRaw = extractField(text, CONSENT_FORM_PATTERNS.dob);
+  const mobile = extractField(text, CONSENT_FORM_PATTERNS.mobile);
+  const address = extractField(text, CONSENT_FORM_PATTERNS.address);
+  const postcode = extractField(text, CONSENT_FORM_PATTERNS.postcode);
+  const suburb = extractField(text, CONSENT_FORM_PATTERNS.suburb);
+  const medicareNo = extractField(text, CONSENT_FORM_PATTERNS.medicareNo);
+  const medicareRef = extractField(text, CONSENT_FORM_PATTERNS.medicareRef);
+
+  // Determine sex from title
+  let sex: "M" | "F" | "U" = "U";
+  const titleMatch = text.match(CONSENT_FORM_PATTERNS.title);
+  if (titleMatch) {
+    sex = TITLE_TO_SEX[titleMatch[1]] || "U";
+  }
+
+  // Build patient data
+  const patientData: PatientData = {
+    firstName: firstName || defaultData.firstName,
+    lastName: lastName || defaultData.lastName,
+    dob: dobRaw ? convertDateToHL7(dobRaw) : defaultData.dob,
+    sex,
+    phone: mobile?.replace(/\s/g, "") || undefined,
+    address: address || undefined,
+    suburb: suburb || undefined,
+    postcode: postcode || undefined,
+    state: postcode ? inferStateFromPostcode(postcode) : undefined,
+    medicareNo: medicareNo?.replace(/\s/g, "") || undefined,
+    medicareRef: medicareRef || undefined,
+  };
+
+  // Add warnings for missing fields
+  if (!firstName) warnings.push("Could not extract first name");
+  if (!lastName) warnings.push("Could not extract last name");
+  if (!dobRaw) warnings.push("Could not extract date of birth");
+  if (sex === "U") warnings.push("Could not determine sex from title");
+  if (!medicareNo) warnings.push("Could not extract Medicare number");
+
+  const success =
+    patientData.firstName !== "UNKNOWN" && patientData.lastName !== "PATIENT";
+
+  return { data: patientData, success };
+}
+
+/**
+ * Extract patient data from referral letter PDF
+ */
+function extractReferralLetterData(
+  text: string,
+  warnings: string[]
+): { data: PatientData; success: boolean } {
+  const defaultData: PatientData = {
+    firstName: "UNKNOWN",
+    lastName: "PATIENT",
+    dob: "19000101",
+    sex: "U",
+  };
+
+  // Extract from RE: line - most reliable pattern
+  const patientLineMatch = text.match(REFERRAL_PATTERNS.patientLine);
+  let firstName: string | null = null;
+  let lastName: string | null = null;
+  let dobRaw: string | null = null;
+
+  if (patientLineMatch) {
+    // Format 1: "RE: Scott LAWLER" - groups 1, 2
+    // Format 2: "RE: LAWLER, Scott" - groups 3, 4
+    // DOB is always group 5
+    if (patientLineMatch[1] && patientLineMatch[2]) {
+      firstName = cleanText(patientLineMatch[1]);
+      lastName = cleanText(patientLineMatch[2]);
+    } else if (patientLineMatch[3] && patientLineMatch[4]) {
+      lastName = cleanText(patientLineMatch[3]);
+      firstName = cleanText(patientLineMatch[4]);
+    }
+    dobRaw = patientLineMatch[5] || null;
+  }
+
+  // Extract phone (medium reliability)
+  const phone = extractField(text, REFERRAL_PATTERNS_SECONDARY.phone);
+
+  // Extract address (medium reliability)
+  let address: string | undefined;
+  let suburb: string | undefined;
+  let state: string | undefined;
+  let postcode: string | undefined;
+
+  const addressMatch = text.match(REFERRAL_PATTERNS_SECONDARY.addressLine);
+  if (addressMatch) {
+    address = cleanText(addressMatch[1]);
+    suburb = cleanText(addressMatch[2]);
+    state = cleanText(addressMatch[3]);
+    postcode = cleanText(addressMatch[4]);
+  }
+
+  // Infer sex from pronouns
+  const sex = inferSexFromPronouns(text);
+
+  // Build patient data
+  const patientData: PatientData = {
+    firstName: firstName || defaultData.firstName,
+    lastName: lastName || defaultData.lastName,
+    dob: dobRaw ? convertDateToHL7(dobRaw) : defaultData.dob,
+    sex,
+    phone: phone?.replace(/\s/g, "") || undefined,
+    address,
+    suburb,
+    state: state || (postcode ? inferStateFromPostcode(postcode) : undefined),
+    postcode,
+  };
+
+  // Add warnings for missing fields
+  if (!firstName) warnings.push("Could not extract first name from RE: line");
+  if (!lastName) warnings.push("Could not extract last name from RE: line");
+  if (!dobRaw) warnings.push("Could not extract date of birth from RE: line");
+  if (sex === "U")
+    warnings.push("Could not determine sex from pronouns (defaulting to Unknown)");
+  if (!phone) warnings.push("Could not extract phone number");
+  if (!address) warnings.push("Could not extract address");
+  // Note: Medicare not expected in referral letters - no warning
+
+  const success =
+    patientData.firstName !== "UNKNOWN" && patientData.lastName !== "PATIENT";
+
+  return { data: patientData, success };
+}
+
+/**
+ * Extract patient data from PDF - auto-detects document type
  */
 export async function extractPatientData(
   pdfBuffer: Buffer
@@ -118,57 +322,27 @@ export async function extractPatientData(
 
     if (!text || text.trim().length === 0) {
       warnings.push("PDF contains no extractable text");
-      return { success: false, data: defaultData, warnings };
+      return { success: false, data: defaultData, warnings, documentType: "consent_form" };
     }
 
-    // Extract fields
-    const firstName = extractField(text, PATTERNS.firstName);
-    const lastName = extractField(text, PATTERNS.lastName);
-    const dobRaw = extractField(text, PATTERNS.dob);
-    const mobile = extractField(text, PATTERNS.mobile);
-    const address = extractField(text, PATTERNS.address);
-    const postcode = extractField(text, PATTERNS.postcode);
-    const suburb = extractField(text, PATTERNS.suburb);
-    const medicareNo = extractField(text, PATTERNS.medicareNo);
-    const medicareRef = extractField(text, PATTERNS.medicareRef);
+    // Detect document type
+    const documentType = detectDocumentType(text);
 
-    // Determine sex from title
-    let sex: "M" | "F" | "U" = "U";
-    const titleMatch = text.match(PATTERNS.title);
-    if (titleMatch) {
-      sex = TITLE_TO_SEX[titleMatch[1]] || "U";
+    // Extract based on document type
+    let result: { data: PatientData; success: boolean };
+
+    if (documentType === "referral_letter") {
+      result = extractReferralLetterData(text, warnings);
+    } else {
+      result = extractConsentFormData(text, warnings);
     }
 
-    // Build patient data
-    const patientData: PatientData = {
-      firstName: firstName || defaultData.firstName,
-      lastName: lastName || defaultData.lastName,
-      dob: dobRaw ? convertDateToHL7(dobRaw) : defaultData.dob,
-      sex,
-      phone: mobile?.replace(/\s/g, "") || undefined,
-      address: address || undefined,
-      suburb: suburb || undefined,
-      postcode: postcode || undefined,
-      state: postcode ? inferStateFromPostcode(postcode) : undefined,
-      medicareNo: medicareNo?.replace(/\s/g, "") || undefined,
-      medicareRef: medicareRef || undefined,
-    };
-
-    // Add warnings for missing fields
-    if (!firstName) warnings.push("Could not extract first name");
-    if (!lastName) warnings.push("Could not extract last name");
-    if (!dobRaw) warnings.push("Could not extract date of birth");
-    if (sex === "U") warnings.push("Could not determine sex from title");
-    if (!medicareNo) warnings.push("Could not extract Medicare number");
-
-    const success =
-      patientData.firstName !== "UNKNOWN" &&
-      patientData.lastName !== "PATIENT";
-
-    return { success, data: patientData, warnings };
+    return { ...result, warnings, documentType };
   } catch (error) {
-    warnings.push(`PDF parsing error: ${error instanceof Error ? error.message : "Unknown error"}`);
-    return { success: false, data: defaultData, warnings };
+    warnings.push(
+      `PDF parsing error: ${error instanceof Error ? error.message : "Unknown error"}`
+    );
+    return { success: false, data: defaultData, warnings, documentType: "consent_form" };
   }
 }
 
