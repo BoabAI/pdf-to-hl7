@@ -14,6 +14,12 @@ const REFERRAL_DUMMY_PATH = join(
   "../docs/input PDF/Referral_dummy.pdf"
 );
 
+// GP/Best Practice referral format
+const GP_REFERRAL_PATH = join(
+  import.meta.dir,
+  "../docs/input PDF/BP2026012137327.pdf"
+);
+
 describe("Document Type Detection", () => {
   test("detects consent form correctly", async () => {
     const pdfBuffer = readFileSync(CONSENT_FORM_PATH);
@@ -85,6 +91,70 @@ describe("Referral Letter Extraction", () => {
       w.toLowerCase().includes("medicare")
     );
     expect(medicareWarning).toBeUndefined();
+  });
+});
+
+describe("GP Referral Letter Extraction (Best Practice format)", () => {
+  test("detects as gp_referral", async () => {
+    const pdfBuffer = readFileSync(GP_REFERRAL_PATH);
+    const result = await extractPatientData(pdfBuffer);
+
+    expect(result.documentType).toBe("gp_referral");
+  });
+
+  test("extracts patient name from 're. Mr Tim Ball' format", async () => {
+    const pdfBuffer = readFileSync(GP_REFERRAL_PATH);
+    const result = await extractPatientData(pdfBuffer);
+
+    expect(result.success).toBe(true);
+    expect(result.data.firstName).toBe("Tim");
+    expect(result.data.lastName).toBe("Ball");
+  });
+
+  test("extracts DOB from separate line", async () => {
+    const pdfBuffer = readFileSync(GP_REFERRAL_PATH);
+    const result = await extractPatientData(pdfBuffer);
+
+    // DOB 18/09/1968 should convert to YYYYMMDD format
+    expect(result.data.dob).toBe("19680918");
+  });
+
+  test("extracts sex from title (Mr = Male)", async () => {
+    const pdfBuffer = readFileSync(GP_REFERRAL_PATH);
+    const result = await extractPatientData(pdfBuffer);
+
+    expect(result.data.sex).toBe("M");
+  });
+
+  test("extracts Medicare number", async () => {
+    const pdfBuffer = readFileSync(GP_REFERRAL_PATH);
+    const result = await extractPatientData(pdfBuffer);
+
+    expect(result.data.medicareNo).toBe("2673291844");
+  });
+
+  test("extracts mobile phone", async () => {
+    const pdfBuffer = readFileSync(GP_REFERRAL_PATH);
+    const result = await extractPatientData(pdfBuffer);
+
+    expect(result.data.phone).toBe("0468900291");
+  });
+
+  test("extracts address from multi-line format", async () => {
+    const pdfBuffer = readFileSync(GP_REFERRAL_PATH);
+    const result = await extractPatientData(pdfBuffer);
+
+    expect(result.data.address).toBe("274/4 The Crescent");
+    expect(result.data.suburb).toBe("Wentworth Point");
+    expect(result.data.postcode).toBe("2127");
+    expect(result.data.state).toBe("NSW");
+  });
+
+  test("has no warnings for complete GP referral", async () => {
+    const pdfBuffer = readFileSync(GP_REFERRAL_PATH);
+    const result = await extractPatientData(pdfBuffer);
+
+    expect(result.warnings).toHaveLength(0);
   });
 });
 

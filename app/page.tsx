@@ -21,13 +21,43 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
+  const [isDetecting, setIsDetecting] = useState(false);
   const [result, setResult] = useState<ConversionResult | null>(null);
   // Document type selection
-  const [documentType, setDocumentType] = useState<"auto" | "consent_form" | "referral_letter">("auto");
+  const [documentType, setDocumentType] = useState<"auto" | "consent_form" | "referral_letter" | "gp_referral">("auto");
+  const [detectedType, setDetectedType] = useState<string | null>(null);
   // Genie HL7 action options
   const [autoFile, setAutoFile] = useState(true);
   const [sendToDoctor, setSendToDoctor] = useState(false);
   const [providerNumber, setProviderNumber] = useState("");
+
+  // Auto-detect document type when file is selected
+  const detectDocumentType = useCallback(async (selectedFile: File) => {
+    setIsDetecting(true);
+    try {
+      const formData = new FormData();
+      formData.append("pdf", selectedFile);
+      formData.append("detectOnly", "true");
+
+      const response = await fetch("/api/convert", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (data.success && data.documentType) {
+        setDocumentType(data.documentType);
+        setDetectedType(data.documentType);
+      }
+    } catch (error) {
+      console.error("Detection error:", error);
+      // Fall back to auto on error
+      setDocumentType("auto");
+      setDetectedType(null);
+    } finally {
+      setIsDetecting(false);
+    }
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -47,16 +77,20 @@ export default function Home() {
     if (droppedFile?.type === "application/pdf") {
       setFile(droppedFile);
       setResult(null);
+      setDetectedType(null);
+      detectDocumentType(droppedFile);
     } else {
       alert("Please upload a PDF file");
     }
-  }, []);
+  }, [detectDocumentType]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
       setFile(selectedFile);
       setResult(null);
+      setDetectedType(null);
+      detectDocumentType(selectedFile);
     }
   };
 
@@ -111,6 +145,8 @@ export default function Home() {
   const handleReset = () => {
     setFile(null);
     setResult(null);
+    setDocumentType("auto");
+    setDetectedType(null);
   };
 
   return (
@@ -139,7 +175,7 @@ export default function Home() {
       {/* Supported Format Notice */}
       <div className="mb-6 p-3 bg-blue-50 border border-blue-200 rounded-lg">
         <p className="text-sm text-blue-800">
-          <strong>Supported formats:</strong> BJC Health Consent Forms and Specialist Referral Letters.
+          <strong>Supported formats:</strong> BJC Health Consent Forms, Specialist Referral Letters, and GP Referral Letters (Best Practice).
           Document type is auto-detected, or select manually below.
         </p>
       </div>
@@ -214,16 +250,27 @@ export default function Home() {
           <div className="space-y-1">
             <label htmlFor="documentType" className="block text-sm text-gray-700">
               Document Type
+              {isDetecting && (
+                <span className="ml-2 text-blue-600 text-xs">(detecting...)</span>
+              )}
+              {detectedType && !isDetecting && (
+                <span className="ml-2 text-green-600 text-xs">(auto-detected)</span>
+              )}
             </label>
             <select
               id="documentType"
               value={documentType}
-              onChange={(e) => setDocumentType(e.target.value as "auto" | "consent_form" | "referral_letter")}
-              className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+              onChange={(e) => {
+                setDocumentType(e.target.value as "auto" | "consent_form" | "referral_letter" | "gp_referral");
+                setDetectedType(null); // Clear detected flag when manually changed
+              }}
+              disabled={isDetecting}
+              className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white disabled:bg-gray-100 disabled:cursor-wait"
             >
               <option value="auto">Auto-detect</option>
               <option value="consent_form">Consent Form</option>
-              <option value="referral_letter">Referral Letter</option>
+              <option value="referral_letter">Specialist Referral Letter</option>
+              <option value="gp_referral">GP Referral Letter</option>
             </select>
           </div>
 

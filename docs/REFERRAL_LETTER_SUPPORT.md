@@ -4,18 +4,19 @@ This document describes the referral letter extraction feature added to the PDF 
 
 ## Overview
 
-The application now supports two document types:
+The application now supports three document types:
 1. **BJC Health Consent Forms** - Original support
-2. **Specialist Referral Letters** - New support (e.g., NeuroSpine Clinic letters)
+2. **Specialist Referral Letters** - NeuroSpine Clinic format (`RE: Name - DOB:`)
+3. **GP Referral Letters** - Best Practice/Medical Director format (`re. Mr Name`)
 
 ## Document Type Detection
 
 ### Auto-Detection Logic
 
-The system automatically detects document type by looking for two patterns:
+The system automatically detects document type by looking for patterns:
 
 ```
-if (text contains "Dear Dr/Professor" AND text contains "RE:") {
+if (text contains "Dear Dr/Professor" OR "Dear [Name]," AND text contains "RE:" or "re.") {
   → Referral Letter
 } else {
   → Consent Form
@@ -31,7 +32,7 @@ Users can manually select the document type via a dropdown in the UI:
 
 ## Data Extraction
 
-### Referral Letter Extraction
+### Specialist Referral Letter Extraction (NeuroSpine format)
 
 | Field | Source Pattern | Reliability |
 |-------|----------------|-------------|
@@ -42,7 +43,21 @@ Users can manually select the document type via a dropdown in the UI:
 | Address | Structured address line after RE: | Medium |
 | Provider No | `Provider No: NNNNNNXX` | High |
 
-**Note:** Medicare numbers are NOT expected in referral letters and won't generate warnings.
+**Note:** Medicare numbers are NOT expected in specialist referral letters.
+
+### GP Referral Letter Extraction (Best Practice format)
+
+| Field | Source Pattern | Reliability |
+|-------|----------------|-------------|
+| Patient Name | `re. Mr Tim Ball` (title + name) | High |
+| DOB | `DOB: DD/MM/YYYY` on separate line | High |
+| Sex | Title (Mr/Mrs/Miss/Ms) | High |
+| Phone | `Mobile: NNNN NNN NNN` | High |
+| Address | Multi-line format after DOB | High |
+| Medicare | `Medicare No: NNNNNNNNNN` | High |
+| Provider No | `NNNNNNXX` after signature | Medium |
+
+**Note:** GP letters typically include Medicare numbers.
 
 ### Consent Form Extraction
 
@@ -108,7 +123,8 @@ curl -X POST \
 ## Test PDFs
 
 Test PDFs are stored in `docs/input PDF/`:
-- `Referral_dummy.pdf` - Generated dummy referral letter (safe to commit)
+- `Referral_dummy.pdf` - Generated dummy specialist referral letter (safe to commit)
+- `BP2026012137327.pdf` - GP referral letter (Best Practice format)
 - `Patient_Information_and_Consent_Form_*.pdf` - Consent form (gitignored - contains patient data)
 
 ### Generating Test PDFs

@@ -9,7 +9,7 @@ import pdf from "pdf-parse";
 import type { PatientData } from "./hl7-builder";
 
 // Document types supported
-export type DocumentType = "consent_form" | "referral_letter";
+export type DocumentType = "consent_form" | "referral_letter" | "gp_referral";
 
 export interface ExtractionResult {
   success: boolean;
@@ -67,10 +67,37 @@ const REFERRAL_PATTERNS_SECONDARY = {
   // Phone - try multiple labels
   phone: /(?:Mobile|Ph|Tel|Phone)[:\s]+(\d[\d\s]{9,14})/i,
 
-  // Address line after RE: line
+  // Address line after RE: line (NeuroSpine format)
   // Matches: "104 Stratford Road, TAHMOOR, NSW, 2573"
   addressLine:
     /^\s*(\d+[^,\n]+),\s*([A-Z][A-Za-z\s]+),\s*([A-Z]{2,3}),?\s*(\d{4})\s*$/m,
+};
+
+// GP/Best Practice referral letter patterns
+const GP_REFERRAL_PATTERNS = {
+  // "re. Mr Tim Ball" or "re. Mrs Jane Smith" - title + name format
+  // Captures: (1) title, (2) first name, (3) last name
+  patientLineWithTitle: /\bre\.?\s+(Mr|Mrs|Miss|Ms|Dr)\s+([A-Za-z]+)\s+([A-Za-z]+)/i,
+
+  // DOB on separate line: "DOB: 18/09/1968"
+  dobLine: /\bDOB:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i,
+
+  // Medicare No: 2673291844 (GP letters often include this)
+  medicareNo: /Medicare\s*No[:\s]+(\d{10,11})/i,
+
+  // Mobile on separate line: "Mobile: 0468 900 291"
+  mobile: /Mobile:\s*([\d\s]{10,14})/i,
+
+  // Multi-line address pattern (GP format)
+  // Line 1: "274/4 The Crescent"
+  // Line 2: "Wentworth Point. 2127" or "Wentworth Point NSW 2127"
+  addressBlock: /(?:Medicare|Mobile)[^\n]*\n[\s\S]*?(\d+[\w\/]+\s+[^\n]+)\n([A-Za-z\s]+)[.\s]+(\d{4})/i,
+
+  // Simpler address: just grab the line with a postcode after patient details
+  addressWithPostcode: /^\s*(.+?)[.\s]+(\d{4})\s*$/m,
+
+  // Provider number at signature (no label): "567612EL" on its own line
+  providerNoStandalone: /^\s*(\d{6}[A-Z]{2})\s*$/m,
 };
 
 // Map title to sex
@@ -134,11 +161,21 @@ function extractField(text: string, pattern: RegExp): string | null {
  * Detect document type from PDF text content
  */
 function detectDocumentType(text: string): DocumentType {
-  // Referral letters have "Dear Dr" and "RE:" patterns
+  // Referral letters have "Dear Dr" or "Dear [Name]," and "RE:" or "re." patterns
   const hasDearDr = /Dear\s+(?:Dr|Professor)/i.test(text);
-  const hasReLine = /RE:/i.test(text);
+  const hasDearName = /Dear\s+[A-Z][a-z]+,/m.test(text); // "Dear Elaine,"
+  const hasReLine = /\b(?:RE|re)[:\.]?\s+/i.test(text); // RE: or re. or re
 
-  if (hasDearDr && hasReLine) {
+  if ((hasDearDr || hasDearName) && hasReLine) {
+    // Distinguish between specialist and GP referral formats
+    // GP format: "re. Mr Tim Ball" (lowercase re., title + name)
+    const isGPFormat = /\bre\.?\s+(?:Mr|Mrs|Miss|Ms|Dr)\s+[A-Za-z]+\s+[A-Za-z]+/i.test(text);
+    // GP format also has Medicare No
+    const hasMedicareNo = /Medicare\s*No[:\s]+\d{10,11}/i.test(text);
+
+    if (isGPFormat || hasMedicareNo) {
+      return "gp_referral";
+    }
     return "referral_letter";
   }
   return "consent_form";
@@ -218,6 +255,9 @@ function extractConsentFormData(
 
 /**
  * Extract patient data from referral letter PDF
+ * Supports two formats:
+ * 1. NeuroSpine format: "RE: FirstName LASTNAME - DOB: DD/MM/YYYY"
+ * 2. GP/Best Practice format: "re. Mr Tim Ball" with DOB on separate line
  */
 function extractReferralLetterData(
   text: string,
@@ -230,12 +270,15 @@ function extractReferralLetterData(
     sex: "U",
   };
 
-  // Extract from RE: line - most reliable pattern
-  const patientLineMatch = text.match(REFERRAL_PATTERNS.patientLine);
   let firstName: string | null = null;
   let lastName: string | null = null;
   let dobRaw: string | null = null;
+  let sex: "M" | "F" | "U" = "U";
+  let medicareNo: string | undefined;
+  let medicareRef: string | undefined;
 
+  // Try NeuroSpine format first: "RE: Scott LAWLER - DOB: DD/MM/YYYY"
+  const patientLineMatch = text.match(REFERRAL_PATTERNS.patientLine);
   if (patientLineMatch) {
     // Format 1: "RE: Scott LAWLER" - groups 1, 2
     // Format 2: "RE: LAWLER, Scott" - groups 3, 4
@@ -248,17 +291,56 @@ function extractReferralLetterData(
       firstName = cleanText(patientLineMatch[4]);
     }
     dobRaw = patientLineMatch[5] || null;
+    // Infer sex from pronouns for NeuroSpine format
+    sex = inferSexFromPronouns(text);
   }
 
-  // Extract phone (medium reliability)
-  const phone = extractField(text, REFERRAL_PATTERNS_SECONDARY.phone);
+  // Try GP/Best Practice format if NeuroSpine didn't work: "re. Mr Tim Ball"
+  if (!firstName || !lastName) {
+    const gpPatientMatch = text.match(GP_REFERRAL_PATTERNS.patientLineWithTitle);
+    if (gpPatientMatch) {
+      const title = gpPatientMatch[1];
+      firstName = cleanText(gpPatientMatch[2]);
+      lastName = cleanText(gpPatientMatch[3]);
+      // Use title to determine sex (more reliable than pronouns)
+      sex = TITLE_TO_SEX[title] || "U";
+    }
+  }
 
-  // Extract address (medium reliability)
+  // Extract DOB from separate line if not found in RE: line (GP format)
+  if (!dobRaw) {
+    const dobMatch = text.match(GP_REFERRAL_PATTERNS.dobLine);
+    if (dobMatch) {
+      dobRaw = dobMatch[1];
+    }
+  }
+
+  // Extract Medicare (GP letters often include this)
+  const medicareMatch = text.match(GP_REFERRAL_PATTERNS.medicareNo);
+  if (medicareMatch) {
+    const fullMedicare = medicareMatch[1];
+    // Medicare format: 10 digits + optional 1 digit ref
+    if (fullMedicare.length === 11) {
+      medicareNo = fullMedicare.substring(0, 10);
+      medicareRef = fullMedicare.substring(10);
+    } else {
+      medicareNo = fullMedicare;
+    }
+  }
+
+  // Extract phone - try GP format first, then general pattern
+  let phone = extractField(text, GP_REFERRAL_PATTERNS.mobile);
+  if (!phone) {
+    phone = extractField(text, REFERRAL_PATTERNS_SECONDARY.phone);
+  }
+
+  // Extract address
   let address: string | undefined;
   let suburb: string | undefined;
   let state: string | undefined;
   let postcode: string | undefined;
 
+  // Try NeuroSpine single-line format first
   const addressMatch = text.match(REFERRAL_PATTERNS_SECONDARY.addressLine);
   if (addressMatch) {
     address = cleanText(addressMatch[1]);
@@ -267,8 +349,25 @@ function extractReferralLetterData(
     postcode = cleanText(addressMatch[4]);
   }
 
-  // Infer sex from pronouns
-  const sex = inferSexFromPronouns(text);
+  // Try GP multi-line format if single-line didn't work
+  if (!address) {
+    // Look for address pattern after patient details
+    // Pattern: street line, then suburb. postcode
+    const gpAddressMatch = text.match(
+      /(?:re\.[^\n]+\n.*?DOB:[^\n]+\n)([^\n]+)\n([A-Za-z\s]+)[.\s]+(\d{4})/is
+    );
+    if (gpAddressMatch) {
+      address = cleanText(gpAddressMatch[1]);
+      suburb = cleanText(gpAddressMatch[2]);
+      postcode = cleanText(gpAddressMatch[3]);
+      state = inferStateFromPostcode(postcode);
+    }
+  }
+
+  // Fall back to inferring sex from pronouns if title didn't help
+  if (sex === "U") {
+    sex = inferSexFromPronouns(text);
+  }
 
   // Build patient data
   const patientData: PatientData = {
@@ -281,17 +380,19 @@ function extractReferralLetterData(
     suburb,
     state: state || (postcode ? inferStateFromPostcode(postcode) : undefined),
     postcode,
+    medicareNo,
+    medicareRef,
   };
 
   // Add warnings for missing fields
-  if (!firstName) warnings.push("Could not extract first name from RE: line");
-  if (!lastName) warnings.push("Could not extract last name from RE: line");
-  if (!dobRaw) warnings.push("Could not extract date of birth from RE: line");
+  if (!firstName) warnings.push("Could not extract first name from referral");
+  if (!lastName) warnings.push("Could not extract last name from referral");
+  if (!dobRaw) warnings.push("Could not extract date of birth from referral");
   if (sex === "U")
-    warnings.push("Could not determine sex from pronouns (defaulting to Unknown)");
+    warnings.push("Could not determine sex (defaulting to Unknown)");
   if (!phone) warnings.push("Could not extract phone number");
   if (!address) warnings.push("Could not extract address");
-  // Note: Medicare not expected in referral letters - no warning
+  // Note: Medicare IS expected in GP letters but not specialist letters
 
   const success =
     patientData.firstName !== "UNKNOWN" && patientData.lastName !== "PATIENT";
@@ -338,7 +439,7 @@ export async function extractPatientData(
     // Extract based on document type
     let result: { data: PatientData; success: boolean };
 
-    if (documentType === "referral_letter") {
+    if (documentType === "referral_letter" || documentType === "gp_referral") {
       result = extractReferralLetterData(text, warnings);
     } else {
       result = extractConsentFormData(text, warnings);

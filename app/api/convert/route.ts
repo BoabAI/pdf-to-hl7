@@ -38,15 +38,28 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const pdfBuffer = Buffer.from(arrayBuffer);
 
-    // Get document type preference (auto, consent_form, or referral_letter)
+    // Check if this is a detect-only request
+    const detectOnly = formData.get("detectOnly") === "true";
+
+    // Get document type preference (auto, consent_form, referral_letter, or gp_referral)
     const documentTypeParam = formData.get("documentType") as string | null;
     const documentType =
-      documentTypeParam === "consent_form" || documentTypeParam === "referral_letter"
+      documentTypeParam === "consent_form" ||
+      documentTypeParam === "referral_letter" ||
+      documentTypeParam === "gp_referral"
         ? documentTypeParam
         : "auto";
 
     // Extract patient data from PDF
     const extraction = await extractPatientData(pdfBuffer, documentType);
+
+    // If detect-only, return just the document type
+    if (detectOnly) {
+      return NextResponse.json({
+        success: true,
+        documentType: extraction.documentType,
+      });
+    }
 
     if (!extraction.success && extraction.warnings.length > 0) {
       console.warn("PDF extraction warnings:", extraction.warnings);
